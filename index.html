@@ -596,6 +596,8 @@ function doLogin() {
     sha256.h=null;sha256.k=null; var h = sha256(p + 'insel_salt_2024');
     if (h !== user.passwordHash) { showErr('Falsches Passwort.'); return; }
     setSession(user);
+    document.getElementById('loginUser').value = '';
+    document.getElementById('loginPass').value = '';
     openApp();
   } catch(err) {
     showErr('Fehler beim Login: ' + err.message);
@@ -626,6 +628,11 @@ function doRegister() {
     db.users.push(newUser);
     saveDB(db);
     setSession(newUser);
+    // Formular leeren damit keine Daten sichtbar bleiben
+    document.getElementById('regName').value = '';
+    document.getElementById('regUser').value = '';
+    document.getElementById('regPass').value = '';
+    document.getElementById('regPass2').value = '';
     toast('Willkommen, ' + name + '!', 'green');
     openApp();
   } catch(err) {
@@ -936,7 +943,7 @@ function renderTeam() {
   if (!currentUser) return;
   var db = loadDB();
   document.getElementById('stKinder').textContent = db.persons.length;
-  document.getElementById('stTeam').textContent = db.users.length;
+  document.getElementById('stTeam').textContent = db.users.filter(function(u){ return u.role !== 'admin'; }).length;
   document.getElementById('stKW').textContent = getKW(currentMonday);
   var days = weekDays(currentMonday);
   var dnames = ['Montag','Dienstag','Mittwoch','Donnerstag','Freitag'];
