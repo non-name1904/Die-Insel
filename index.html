@@ -655,6 +655,7 @@ function openApp() {
   renderAll();
   checkBackup();
   updateSaveLocationInfo();
+  updateDBInfo();
   checkSaveReminder();
 }
 
@@ -1182,7 +1183,11 @@ function loadJSON(input) {
 function updateDBInfo() {
   var db = loadDB(), el = document.getElementById('dbInfo');
   if (!el) return;
+  var volunteers = db.users.filter(function(u){ return u.role !== 'admin'; }).length;
   el.innerHTML = '👦 ' + db.persons.length + ' Kinder &nbsp;·&nbsp; 👥 ' + db.users.length + ' Nutzer:innen &nbsp;·&nbsp; 📅 ' + Object.keys(db.attendance).length + ' Tage';
+  // Admin-Bereich Sichtbarkeit (hier ist currentUser bereits gesetzt)
+  var adminSec = document.getElementById('adminSaveSection');
+  if (adminSec) adminSec.style.display = (currentUser && currentUser.role === 'admin') ? '' : 'none';
 }
 // ══════════════════════════════════════════
 // SPEICHERORT-VERWALTUNG (IndexedDB)
