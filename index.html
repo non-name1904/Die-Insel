@@ -363,7 +363,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','Helvetica Neue'
               <span class="s-icon">📁</span>
               <div class="s-text">
                 <div class="s-label">Speicherort festlegen <span style="font-size:10px;background:#fef0f0;color:#E2001A;padding:2px 6px;border-radius:99px;font-weight:700">Admin</span></div>
-                <div class="s-sub">OneDrive / Google Drive Ordner wählen</div>
+                <div class="s-sub">Anleitung: Download-Ordner auf Google Drive setzen</div>
               </div>
               <span class="s-arrow">›</span>
             </div>
@@ -1258,9 +1258,14 @@ async function updateSaveLocationInfo() {
 
 // Admin: Speicherort festlegen
 async function setSaveLocation() {
-  if (!window.showDirectoryPicker) {
-    toast('Nicht unterstützt auf diesem Gerät', 'red'); return;
+  var isAndroid = /Android/.test(navigator.userAgent);
+
+  if (isAndroid || !window.showDirectoryPicker) {
+    // Android: Anleitung zeigen zum Setzen des Chrome Download-Ordners
+    showAndroidFolderGuide();
+    return;
   }
+  // Desktop Chrome
   try {
     var handle = await window.showDirectoryPicker({mode: 'readwrite', startIn: 'documents'});
     await saveFolderHandle(handle);
@@ -1269,6 +1274,35 @@ async function setSaveLocation() {
   } catch(err) {
     if (err.name !== 'AbortError') toast('Fehler beim Auswählen', 'red');
   }
+}
+
+function showAndroidFolderGuide() {
+  var overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:99999;display:flex;align-items:flex-end;justify-content:center;padding:0';
+  overlay.innerHTML =
+    '<div style="background:#fff;border-radius:20px 20px 0 0;width:100%;padding:20px 20px 32px;max-height:85vh;overflow-y:auto">' +
+      '<div style="font-size:18px;font-weight:700;margin-bottom:6px;color:#1c1c1e">📁 Speicherort einrichten</div>' +
+      '<div style="font-size:13px;color:#8e8e93;margin-bottom:18px">Einmalig in Chrome einstellen — danach landen alle Dateien automatisch im richtigen Ordner.</div>' +
+      '<div style="background:#f2f2f7;border-radius:12px;padding:16px;margin-bottom:16px">' +
+        '<div style="font-weight:700;font-size:14px;margin-bottom:10px;color:#1c1c1e">So geht es:</div>' +
+        '<div style="font-size:14px;line-height:2;color:#333">' +
+          '1️⃣ &nbsp;Chrome öffnen → drei Punkte ⋮<br>' +
+          '2️⃣ &nbsp;<strong>Einstellungen</strong> antippen<br>' +
+          '3️⃣ &nbsp;<strong>Downloads</strong> antippen<br>' +
+          '4️⃣ &nbsp;<strong>Speicherort</strong> → Ordner wählen<br>' +
+          '5️⃣ &nbsp;Zu <strong>OneDrive</strong> oder <strong>Google Drive</strong> navigieren<br>' +
+          '6️⃣ &nbsp;Den gewünschten Ordner auswählen ✓' +
+        '</div>' +
+      '</div>' +
+      '<div style="background:#e8f5e9;border-radius:12px;padding:12px;margin-bottom:20px;font-size:13px;color:#1a7d3a;line-height:1.5">' +
+        '✅ &nbsp;Danach landen alle Dateien (<strong>insel-KW19-2026.json</strong> usw.) automatisch in deinem Google Drive Ordner. Funktioniert mit Chrome und Brave.' +
+      '</div>' +
+      '<button id="closeGuideBtn" style="width:100%;padding:14px;background:#E2001A;color:#fff;border:none;border-radius:13px;font-size:16px;font-weight:700;cursor:pointer">Verstanden</button>' +
+    '</div>';
+  document.body.appendChild(overlay);
+  document.getElementById('closeGuideBtn').addEventListener('click', function(){
+    document.body.removeChild(overlay);
+  });
 }
 
 // Admin: Speicherort zurücksetzen
