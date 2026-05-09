@@ -357,6 +357,22 @@ body{font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','Helvetica Neue'
       <div class="card">
         <div class="card-head dark">💾 Datenverwaltung</div>
         <div>
+          <!-- Speicherort (nur Admin) -->
+          <div id="adminSaveSection">
+            <div class="settings-item" id="siSetFolder" style="border-bottom:0.5px solid #e5e5ea">
+              <span class="s-icon">📁</span>
+              <div class="s-text">
+                <div class="s-label">Speicherort festlegen <span style="font-size:10px;background:#fef0f0;color:#E2001A;padding:2px 6px;border-radius:99px;font-weight:700">Admin</span></div>
+                <div class="s-sub">OneDrive / Google Drive Ordner wählen</div>
+              </div>
+              <span class="s-arrow">›</span>
+            </div>
+            <div style="padding:10px 16px;display:flex;align-items:center;gap:10px;border-bottom:0.5px solid #e5e5ea;background:#f9f9f9">
+              <span style="font-size:20px">📍</span>
+              <div style="flex:1;font-size:13px;color:#555">Aktueller Ort: <span id="saveLocationInfo"><span style="color:#8e8e93">Kein Ort festgelegt</span></span></div>
+              <button id="siClearFolder" type="button" style="background:none;border:none;color:#E2001A;font-size:12px;font-weight:700;cursor:pointer;padding:4px 8px">Zurücksetzen</button>
+            </div>
+          </div>
           <div class="settings-item" id="siLoadJSON">
             <span class="s-icon">📂</span>
             <div class="s-text"><div class="s-label">JSON laden</div><div class="s-sub">Gespeicherte Datei wiederherstellen</div></div>
@@ -364,12 +380,12 @@ body{font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','Helvetica Neue'
           </div>
           <div class="settings-item" id="siSaveJSON">
             <span class="s-icon">💾</span>
-            <div class="s-text"><div class="s-label">JSON speichern</div><div class="s-sub">Alle Daten sichern</div></div>
+            <div class="s-text"><div class="s-label">JSON speichern</div><div class="s-sub">Wird im festgelegten Ordner gespeichert</div></div>
             <span class="s-arrow">›</span>
           </div>
           <div class="settings-item" id="siExcel">
             <span class="s-icon">📊</span>
-            <div class="s-text"><div class="s-label">Excel exportieren</div><div class="s-sub">Aktuelle Woche als .xls</div></div>
+            <div class="s-text"><div class="s-label">Excel exportieren</div><div class="s-sub">Wird im festgelegten Ordner gespeichert</div></div>
             <span class="s-arrow">›</span>
           </div>
         </div>
@@ -405,6 +421,19 @@ body{font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','Helvetica Neue'
     <div class="modal-foot">
       <button class="btn-cancel" type="button" id="btnDismissBackup">Später</button>
       <button class="btn-ok" type="button" id="btnDoBackup">Jetzt sichern</button>
+    </div>
+  </div>
+</div>
+
+<!-- Montag/Freitag Speicher-Erinnerung -->
+<div id="saveBanner" style="display:none;position:fixed;top:0;left:0;right:0;z-index:99997;background:linear-gradient(135deg,#1a7d3a,#145f2c);color:#fff;padding:16px;padding-top:calc(16px + env(safe-area-inset-top));align-items:flex-start;gap:14px;box-shadow:0 4px 20px rgba(0,0,0,0.3)">
+  <div style="font-size:32px;flex-shrink:0;margin-top:2px">💾</div>
+  <div style="flex:1;min-width:0">
+    <div style="font-size:16px;font-weight:700;margin-bottom:4px">Datensicherung fällig</div>
+    <div style="font-size:13px;opacity:0.9;line-height:1.5">Heute ist <span id="saveBannerDay"></span> — bitte die Wochendaten jetzt sichern. Die Datei wird automatisch als <strong id="saveBannerFile"></strong> gespeichert.</div>
+    <div style="display:flex;gap:10px;margin-top:12px">
+      <button id="saveBannerBtn" type="button" style="flex:1;padding:12px;background:#fff;color:#1a7d3a;border:none;border-radius:11px;font-size:15px;font-weight:700;cursor:pointer">Jetzt speichern</button>
+      <button id="saveBannerDismiss" type="button" style="padding:12px 16px;background:rgba(255,255,255,0.2);color:#fff;border:none;border-radius:11px;font-size:14px;font-weight:600;cursor:pointer">Später</button>
     </div>
   </div>
 </div>
@@ -618,6 +647,8 @@ function openApp() {
   document.getElementById('appScreen').classList.add('active');
   renderAll();
   checkBackup();
+  updateSaveLocationInfo();
+  checkSaveReminder();
 }
 
 // ═══════════════════════════════════
@@ -974,7 +1005,7 @@ function switchTab(tab) {
   if (sa) sa.scrollTop = 0;
   if (tab === 'notizen') renderNotes();
   if (tab === 'team') renderTeam();
-  if (tab === 'daten') updateDBInfo();
+  if (tab === 'daten') { updateDBInfo(); updateSaveLocationInfo(); }
 }
 function navigate(dir) {
   currentMonday = new Date(currentMonday);
@@ -1011,7 +1042,9 @@ function dismissBackup() {
 }
 function exportData() {
   var db = loadDB();
-  var fname = 'insel-daten-' + dStr(new Date()) + '.json';
+  var kw  = getKW(new Date());
+  var yr  = getKWYear(new Date());
+  var fname = 'insel-KW' + String(kw).padStart(2,'0') + '-' + yr + '.json';
   var blob = new Blob([JSON.stringify(db, null, 2)], { type: 'application/json' });
   var url = URL.createObjectURL(blob);
   var isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
@@ -1059,6 +1092,30 @@ document.getElementById('newKind').addEventListener('keydown', function(e){ if(e
 });
 
 // Daten page
+// Save banner buttons
+(function() {
+  var sbBtn = document.getElementById('saveBannerBtn');
+  var sbDis = document.getElementById('saveBannerDismiss');
+  var sbDay = document.getElementById('saveBannerDay');
+  var sbFile = document.getElementById('saveBannerFile');
+  var dayNames = ['Sonntag','Montag','Dienstag','Mittwoch','Donnerstag','Freitag','Samstag'];
+  if (sbDay) sbDay.textContent = dayNames[new Date().getDay()];
+  if (sbFile) {
+    var kw2 = getKW(new Date()), yr2 = getKWYear(new Date());
+    sbFile.textContent = 'insel-KW' + String(kw2).padStart(2,'0') + '-' + yr2 + '.json';
+  }
+  if (sbBtn) sbBtn.addEventListener('click', function(){ saveJSON(); });
+  if (sbDis) sbDis.addEventListener('click', function(){
+    document.getElementById('saveBanner').style.display = 'none';
+    toast('Nicht vergessen: Heute noch speichern!', 'red');
+  });
+  // Also wire admin section visibility + siSetFolder + siClearFolder
+  var adminSec = document.getElementById('adminSaveSection');
+  if (adminSec) adminSec.style.display = currentUser && currentUser.role === 'admin' ? '' : 'none';
+  ab('siSetFolder',   function(){ setSaveLocation(); });
+  ab('siClearFolder', function(){ clearSaveLocation(); });
+})();
+
 ab('siLoadJSON', function(){ document.getElementById('jsonFileInput').click(); });
 ab('siSaveJSON', function(){ saveJSON(); });
 ab('siExcel',    function(){ exportExcel(); });
@@ -1120,14 +1177,127 @@ function updateDBInfo() {
   if (!el) return;
   el.innerHTML = '👦 ' + db.persons.length + ' Kinder &nbsp;·&nbsp; 👥 ' + db.users.length + ' Nutzer:innen &nbsp;·&nbsp; 📅 ' + Object.keys(db.attendance).length + ' Tage';
 }
-function saveJSON() {
+// ══════════════════════════════════════════
+// SPEICHERORT-VERWALTUNG (IndexedDB)
+// ══════════════════════════════════════════
+
+// IndexedDB: Handle speichern und laden
+function openHandleDB() {
+  return new Promise(function(resolve, reject) {
+    var req = indexedDB.open('insel-storage', 1);
+    req.onupgradeneeded = function(e) {
+      e.target.result.createObjectStore('handles');
+    };
+    req.onsuccess = function(e) { resolve(e.target.result); };
+    req.onerror = function() { reject(); };
+  });
+}
+
+async function saveFolderHandle(handle) {
+  try {
+    var db = await openHandleDB();
+    var tx = db.transaction('handles', 'readwrite');
+    tx.objectStore('handles').put(handle, 'saveFolder');
+    return new Promise(function(res){ tx.oncomplete = res; });
+  } catch(e) {}
+}
+
+async function loadFolderHandle() {
+  try {
+    var db = await openHandleDB();
+    return new Promise(function(resolve) {
+      var tx = db.transaction('handles', 'readonly');
+      var req = tx.objectStore('handles').get('saveFolder');
+      req.onsuccess = function(e) { resolve(e.target.result || null); };
+      req.onerror = function() { resolve(null); };
+    });
+  } catch(e) { return null; }
+}
+
+async function clearFolderHandle() {
+  try {
+    var db = await openHandleDB();
+    var tx = db.transaction('handles', 'readwrite');
+    tx.objectStore('handles').delete('saveFolder');
+  } catch(e) {}
+}
+
+async function getFolderPermission(handle) {
+  if (!handle) return false;
+  try {
+    var perm = await handle.queryPermission({mode: 'readwrite'});
+    if (perm === 'granted') return true;
+    perm = await handle.requestPermission({mode: 'readwrite'});
+    return perm === 'granted';
+  } catch(e) { return false; }
+}
+
+// Speicherort-Info anzeigen
+async function updateSaveLocationInfo() {
+  var el = document.getElementById('saveLocationInfo');
+  if (!el) return;
+  var handle = await loadFolderHandle();
+  if (handle) {
+    el.innerHTML = '<span style="color:#1a7d3a;font-weight:600">✓ ' + handle.name + '</span>';
+  } else {
+    el.innerHTML = '<span style="color:#8e8e93">Kein Speicherort festgelegt</span>';
+  }
+}
+
+// Admin: Speicherort festlegen
+async function setSaveLocation() {
+  if (!window.showDirectoryPicker) {
+    toast('Nicht unterstützt auf diesem Gerät', 'red'); return;
+  }
+  try {
+    var handle = await window.showDirectoryPicker({mode: 'readwrite', startIn: 'documents'});
+    await saveFolderHandle(handle);
+    await updateSaveLocationInfo();
+    toast('Speicherort festgelegt: ' + handle.name + ' ✓', 'green');
+  } catch(err) {
+    if (err.name !== 'AbortError') toast('Fehler beim Auswählen', 'red');
+  }
+}
+
+// Admin: Speicherort zurücksetzen
+async function clearSaveLocation() {
+  await clearFolderHandle();
+  await updateSaveLocationInfo();
+  toast('Speicherort zurückgesetzt', 'red');
+}
+
+// Datei in festgelegtem Ordner speichern
+async function writeToSaveFolder(filename, content, mimeType) {
+  var handle = await loadFolderHandle();
+  if (!handle) return false;
+  var hasPerm = await getFolderPermission(handle);
+  if (!hasPerm) {
+    toast('Bitte Zugriff auf den Speicherordner erlauben', 'red');
+    return false;
+  }
+  try {
+    var fileHandle = await handle.getFileHandle(filename, {create: true});
+    var writable = await fileHandle.createWritable();
+    await writable.write(content);
+    await writable.close();
+    markWeekSaved();
+    toast('Gespeichert in ' + handle.name + ': ' + filename + ' ✓', 'green');
+    return true;
+  } catch(e) {
+    toast('Fehler beim Speichern: ' + e.message, 'red');
+    return false;
+  }
+}
+
+async function saveJSON() {
   var db = loadDB();
   var fname = 'insel-daten-' + dStr(new Date()) + '.json';
   var json = JSON.stringify(db, null, 2);
   localStorage.setItem('insel_backup_ts', Date.now().toString());
   var blob = new Blob([json], {type: 'application/json'});
   var isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
-  // Try Web Share API first (iOS native share sheet → "In Dateien sichern")
+
+  // iOS: Web Share API
   if (isIOS && navigator.share && navigator.canShare) {
     var file = new File([blob], fname, {type: 'application/json'});
     if (navigator.canShare({files: [file]})) {
@@ -1137,16 +1307,38 @@ function saveJSON() {
       return;
     }
   }
-  // Desktop or fallback
+
   if (!isIOS) {
+    // Versuche zuerst den festgelegten Ordner zu nutzen
+    var saved = await writeToSaveFolder(fname, json, 'application/json');
+    if (saved) return;
+
+    // Kein Ordner festgelegt → "Speichern unter" Dialog
+    if (window.showSaveFilePicker) {
+      try {
+        var pickerHandle = await window.showSaveFilePicker({
+          suggestedName: fname,
+          types: [{ description: 'JSON Datei', accept: {'application/json': ['.json']} }],
+          startIn: 'documents'
+        });
+        var writable = await pickerHandle.createWritable();
+        await writable.write(json);
+        await writable.close();
+        markWeekSaved();
+        toast('Gespeichert: ' + pickerHandle.name + ' ✓', 'green');
+        return;
+      } catch(err) {
+        if (err.name === 'AbortError') return;
+      }
+    }
+    // Letzter Fallback: normaler Download
     var url = URL.createObjectURL(blob);
     var a = document.createElement('a');
     a.href = url; a.download = fname;
     document.body.appendChild(a); a.click();
     setTimeout(function(){ document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
+    markWeekSaved();
     toast('JSON gespeichert ✓', 'green');
-  } else {
-    showFallbackSave(json, fname);
   }
 }
 
@@ -1196,7 +1388,36 @@ function exportExcel() {
   var blob=new Blob([html],{type:'application/vnd.ms-excel;charset=utf-8'});
   var url=URL.createObjectURL(blob);
   var fname='Insel_KW'+kw+'_'+yr+'.xls';
-  if(/iPad|iPhone|iPod/.test(navigator.userAgent)){
+  var isIOSxl = /iPad|iPhone|iPod/.test(navigator.userAgent);
+
+  // Desktop: Festgelegten Ordner oder Speichern-Dialog nutzen
+  if (!isIOSxl) {
+    (async function(){
+      var saved = await writeToSaveFolder(fname, blob, 'application/vnd.ms-excel');
+      if (saved) return;
+      if (window.showSaveFilePicker) {
+        try {
+          var handle = await window.showSaveFilePicker({
+            suggestedName: fname,
+            types: [{description: 'Excel Datei', accept: {'application/vnd.ms-excel': ['.xls']}}],
+            startIn: 'documents'
+          });
+          var writable = await handle.createWritable();
+          await writable.write(blob);
+          await writable.close();
+          toast('Excel gespeichert: ' + handle.name + ' ✓', 'green');
+          return;
+        } catch(err) { if (err.name === 'AbortError') return; }
+      }
+      var url2=URL.createObjectURL(blob);var a2=document.createElement('a');
+      a2.href=url2;a2.download=fname;document.body.appendChild(a2);a2.click();
+      setTimeout(function(){document.body.removeChild(a2);URL.revokeObjectURL(url2);},1000);
+      toast('Excel exportiert ✓', 'green');
+    })();
+    return;
+  }
+
+  if(isIOSxl){
     // Try Web Share API
     var xlsBlob = new Blob([html], {type:'application/vnd.ms-excel;charset=utf-8'});
     var xlsFile = new File([xlsBlob], fname, {type:'application/vnd.ms-excel'});
@@ -1242,6 +1463,32 @@ document.addEventListener("click", function(e) {
 var sess = getSession();
 if (sess) { currentUser = sess; openApp(); }
 
+
+// ══════════════════════════════════════════
+// MONTAG/FREITAG SPEICHER-ERINNERUNG
+// ══════════════════════════════════════════
+function getWeekSaveKey() {
+  var kw = getKW(new Date()), yr = getKWYear(new Date());
+  return 'insel_saved_KW' + String(kw).padStart(2,'0') + '_' + yr;
+}
+
+function markWeekSaved() {
+  localStorage.setItem(getWeekSaveKey(), Date.now().toString());
+  var banner = document.getElementById('saveBanner');
+  if (banner) banner.style.display = 'none';
+}
+
+function checkSaveReminder() {
+  var day = new Date().getDay(); // 1=Mo, 5=Fr
+  if (day !== 1 && day !== 5) return; // Nur Mo + Fr prüfen
+  var alreadySaved = localStorage.getItem(getWeekSaveKey());
+  if (alreadySaved) return; // Diese Woche schon gespeichert
+  // Banner anzeigen
+  setTimeout(function() {
+    var banner = document.getElementById('saveBanner');
+    if (banner) banner.style.display = 'flex';
+  }, 1000);
+}
 
 // ══════════════════════════════════
 // PWA — Install Prompt + Service Worker
