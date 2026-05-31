@@ -441,12 +441,51 @@ async function localHash(pw) {
 
 
 // ══════════════════════════════════════════
+// VERSCHLÜSSELUNG der Kindernamen (AES-256-GCM)
+// ══════════════════════════════════════════
+var _cryptoKey = null;
+async function getCryptoKey() {
+  if (_cryptoKey) return _cryptoKey;
+  var enc = new TextEncoder();
+  var keyMaterial = await crypto.subtle.importKey(
+    'raw', enc.encode('insel_badenstedt_kinder_2024'),
+    {name: 'PBKDF2'}, false, ['deriveKey']
+  );
+  _cryptoKey = await crypto.subtle.deriveKey(
+    {name: 'PBKDF2', salt: enc.encode('insel_aes_salt_v1'), iterations: 100000, hash: 'SHA-256'},
+    keyMaterial, {name: 'AES-GCM', length: 256}, false, ['encrypt', 'decrypt']
+  );
+  return _cryptoKey;
+}
+
+async function encryptName(name) {
+  var key = await getCryptoKey();
+  var iv = crypto.getRandomValues(new Uint8Array(12));
+  var ct = await crypto.subtle.encrypt({name: 'AES-GCM', iv: iv}, key, new TextEncoder().encode(name));
+  var combined = new Uint8Array(iv.length + ct.byteLength);
+  combined.set(iv); combined.set(new Uint8Array(ct), iv.length);
+  return 'enc:' + btoa(String.fromCharCode.apply(null, combined));
+}
+
+async function decryptName(stored) {
+  if (!stored || stored.indexOf('enc:') !== 0) return stored; // Klartext (alt) → unverändert
+  try {
+    var key = await getCryptoKey();
+    var combined = new Uint8Array(atob(stored.slice(4)).split('').map(function(ch){return ch.charCodeAt(0);}));
+    var iv = combined.slice(0, 12), ct = combined.slice(12);
+    var dec = await crypto.subtle.decrypt({name: 'AES-GCM', iv: iv}, key, ct);
+    return new TextDecoder().decode(dec);
+  } catch(e) { return stored; }
+}
+
+// ══════════════════════════════════════════
 // STATE
 // ══════════════════════════════════════════
 var currentUser = null;
 var currentMonday = getMonday(new Date());
 var cachedPersons = [];
 var cachedAttendance = {}; // date_key -> {person_id: {recorded_by, recorded_at}}
+var cachedTotalDays = {}; // person_id -> Gesamtanzahl Anwesenheitstage
 var cachedUsers = [];
 var sharedNotesUnread = 0;
 var realtimeChannel = null;
@@ -555,7 +594,7 @@ async function openApp() {
   document.getElementById('appScreen').classList.add('active');
   showLoading('Daten laden...');
   try {
-    await Promise.all([loadPersons(), loadUsers()]);
+    await Promise.all([loadPersons(), loadUsers(), loadTotalDays()]);
     await loadAttendanceForWeek();
     renderHeader();
     renderTable();
@@ -574,8 +613,15 @@ async function openApp() {
 // DATA LOADING
 // ══════════════════════════════════════════
 async function loadPersons() {
-  var res = await sb.from('persons').select('*').order('name');
-  if (!res.error) cachedPersons = res.data || [];
+  var res = await sb.from('persons').select('*');
+  if (!res.error) {
+    var list = res.data || [];
+    // Namen entschlüsseln
+    await Promise.all(list.map(async function(p){ p.name = await decryptName(p.name); }));
+    // Nach Entschlüsselung alphabetisch sortieren (DB-Sortierung wäre auf Chiffretext)
+    list.sort(function(a,b){return a.name.localeCompare(b.name,'de',{sensitivity:'base'});});
+    cachedPersons = list;
+  }
 }
 
 async function loadUsers() {
@@ -597,6 +643,19 @@ async function loadAttendanceForWeek() {
 }
 
 // ══════════════════════════════════════════
+// GESAMT-ANWESENHEITSTAGE
+// ══════════════════════════════════════════
+async function loadTotalDays() {
+  var res = await sb.from('attendance').select('person_id');
+  cachedTotalDays = {};
+  if (!res.error && res.data) {
+    res.data.forEach(function(r){
+      cachedTotalDays[r.person_id] = (cachedTotalDays[r.person_id] || 0) + 1;
+    });
+  }
+}
+
+// ══════════════════════════════════════════
 // PERSONS
 // ══════════════════════════════════════════
 async function addPerson() {
@@ -606,11 +665,12 @@ async function addPerson() {
   if (cachedPersons.find(function(p){ return p.name.toLowerCase()===name.toLowerCase(); })) {
     toast('Kind bereits vorhanden', 'red'); return;
   }
-  var newP = {id: Date.now().toString(), name: name, since: dStr(new Date())};
-  var res = await sb.from('persons').insert(newP);
+  var encName = await encryptName(name);
+  var newId = Date.now().toString();
+  var res = await sb.from('persons').insert({id: newId, name: encName, since: dStr(new Date())});
   if (!res.error) {
-    cachedPersons.push(newP);
-    cachedPersons.sort(function(a,b){return a.name.localeCompare(b.name);});
+    cachedPersons.push({id: newId, name: name, since: dStr(new Date())}); // Klarname nur im lokalen Cache
+    cachedPersons.sort(function(a,b){return a.name.localeCompare(b.name,'de',{sensitivity:'base'});});
     inp.value = '';
     renderKinder(); renderTable();
     toast(name + ' hinzugefügt', 'green');
@@ -623,29 +683,25 @@ async function delPerson(id) {
   var res = await sb.from('persons').delete().eq('id', id);
   if (!res.error) {
     cachedPersons = cachedPersons.filter(function(x){return x.id!==id;});
-    // Clean up local cache
+    // Lokalen Cache aufräumen
     Object.keys(cachedAttendance).forEach(function(dk){
-      delete cachedAttendance[dk][id];
+      if (cachedAttendance[dk]) delete cachedAttendance[dk][id];
     });
+    delete cachedTotalDays[id];
     renderKinder(); renderTable();
     toast('Kind entfernt', 'red');
   }
 }
 
 function totalDays(pid) {
-  // Count from all attendance keys where this person is present
-  // For performance we don't fetch all; show from cached only
-  var count = 0;
-  Object.values(cachedAttendance).forEach(function(day){
-    if (day[pid]) count++;
-  });
-  return count;
+  return cachedTotalDays[pid] || 0;
 }
 
 // ══════════════════════════════════════════
 // ATTENDANCE
 // ══════════════════════════════════════════
 async function toggleAtt(pid, dateKey, checked) {
+  var wasPresent = cachedAttendance[dateKey] && cachedAttendance[dateKey][pid];
   if (checked) {
     var res = await sb.from('attendance').upsert({
       date_key: dateKey, person_id: pid,
@@ -654,10 +710,14 @@ async function toggleAtt(pid, dateKey, checked) {
     if (!res.error) {
       if (!cachedAttendance[dateKey]) cachedAttendance[dateKey] = {};
       cachedAttendance[dateKey][pid] = {recorded_by: currentUser.id, recorded_at: Date.now()};
+      if (!wasPresent) cachedTotalDays[pid] = (cachedTotalDays[pid] || 0) + 1;
     }
   } else {
     var res = await sb.from('attendance').delete().eq('date_key', dateKey).eq('person_id', pid);
-    if (!res.error && cachedAttendance[dateKey]) delete cachedAttendance[dateKey][pid];
+    if (!res.error && cachedAttendance[dateKey]) {
+      delete cachedAttendance[dateKey][pid];
+      if (wasPresent) cachedTotalDays[pid] = Math.max(0, (cachedTotalDays[pid] || 0) - 1);
+    }
   }
   renderRecBar();
   renderTeam();
@@ -1025,6 +1085,7 @@ async function switchTab(tab) {
   if (tab==='notizen') { await loadNotes(); }
   if (tab==='team') { await loadUsers(); renderTeam(); updateDBInfo(); }
   if (tab==='woche') { await loadAttendanceForWeek(); renderTable(); }
+  if (tab==='kinder') { await Promise.all([loadPersons(), loadTotalDays()]); renderKinder(); }
 }
 
 async function navigate(dir) {
