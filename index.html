@@ -541,7 +541,7 @@ async function doLogin() {
     setSession(res.data);
     await openApp();
   } catch(e) {
-    hideLoading(); showErr('Verbindungsfehler. Bitte erneut versuchen.');
+    hideLoading(); showErr('Keine Verbindung zur Datenbank. Bitte Internet prüfen und erneut versuchen.');
   }
 }
 
@@ -576,7 +576,11 @@ async function doRegister() {
     setSession(newUser);
     await openApp();
   } catch(e) {
-    hideLoading(); showErr('Verbindungsfehler: ' + e.message);
+    hideLoading();
+    var msg = (e.message && e.message.indexOf('fetch') >= 0)
+      ? 'Keine Verbindung zur Datenbank. Bitte Internet prüfen und erneut versuchen.'
+      : 'Es ist ein Fehler aufgetreten. Bitte erneut versuchen.';
+    showErr(msg);
   }
 }
 
@@ -728,11 +732,18 @@ async function toggleAtt(pid, dateKey, checked) {
 // ══════════════════════════════════════════
 async function loadNotes() {
   showLoading('Notizen laden...');
-  var myRes = await sb.from('personal_notes').select('*').eq('user_id', currentUser.id);
-  var shRes = await sb.from('shared_notes').select('*');
-  var rdRes = currentUser.role !== 'admin'
-    ? await sb.from('note_reads').select('kw_key').eq('user_id', currentUser.id)
-    : {data: []};
+  var myRes, shRes, rdRes;
+  try {
+    myRes = await sb.from('personal_notes').select('*').eq('user_id', currentUser.id);
+    shRes = await sb.from('shared_notes').select('*');
+    rdRes = currentUser.role !== 'admin'
+      ? await sb.from('note_reads').select('kw_key').eq('user_id', currentUser.id)
+      : {data: []};
+  } catch(e) {
+    hideLoading();
+    toast('Notizen konnten nicht geladen werden', 'red');
+    return;
+  }
   hideLoading();
   var myNotes = {};
   (myRes.data || []).forEach(function(n){ myNotes[n.kw_key] = n; });
@@ -1092,16 +1103,26 @@ async function navigate(dir) {
   currentMonday=new Date(currentMonday);
   currentMonday.setDate(currentMonday.getDate()+dir*7);
   showLoading('Laden...');
-  await loadAttendanceForWeek();
-  hideLoading();
-  renderTable(); renderTeam();
+  try {
+    await loadAttendanceForWeek();
+    renderTable(); renderTeam();
+  } catch(e) {
+    toast('Verbindungsproblem — bitte erneut versuchen', 'red');
+  } finally {
+    hideLoading();
+  }
 }
 async function goNow() {
   currentMonday=getMonday(new Date());
   showLoading('Laden...');
-  await loadAttendanceForWeek();
-  hideLoading();
-  renderTable(); renderTeam();
+  try {
+    await loadAttendanceForWeek();
+    renderTable(); renderTeam();
+  } catch(e) {
+    toast('Verbindungsproblem — bitte erneut versuchen', 'red');
+  } finally {
+    hideLoading();
+  }
 }
 function clearSearch() {var inp=document.getElementById('searchInput');if(inp){inp.value='';renderTable();}}
 
